@@ -14,7 +14,7 @@ task :rpm do
 end
 
 task :clean do
-  `rm -rf rpm`
+  `rm -rf rpm httop.spec`
 end
 
 def number_of_git_commits
