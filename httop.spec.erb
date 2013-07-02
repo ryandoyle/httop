@@ -1,0 +1,46 @@
+Summary: A top-like tool for investigating Apache using mod_status
+Name: httop
+Version: <%= version %>
+Release: <%= release %>
+License: GPL
+Group: Applications/System
+URL: http://github.com/ryandoyle/httop
+BuildArch: noarch
+Source0: httop
+Source1: LICENSE
+Source2: README.md
+BuildRoot: %{_tmppath}/%{name}-%{version}-%{release}-root
+Requires: curl, ncurses, httpd, ruby >= 1.8.7
+
+%description
+A top-like tool for investigating Apache using mod_status
+
+
+%prep
+cp %{_sourcedir}/httop %{_builddir}
+cp %{_sourcedir}/LICENSE %{_builddir}
+cp %{_sourcedir}/README.md %{_builddir}
+#%setup -q
+
+%build
+# Nothing to build!
+
+%install
+%{__rm} -rf %{buildroot}
+mkdir -p %{buildroot}%{_bindir}
+mkdir -p %{buildroot}%{_docdir}/%{name}-%{version}-%{release}
+install -m 0755 httop %{buildroot}%{_bindir}/
+install -m 0644 LICENSE %{buildroot}%{_docdir}/%{name}-%{version}-%{release}/
+install -m 0644 README.md %{buildroot}%{_docdir}/%{name}-%{version}-%{release}/
+
+%clean
+rm -rf %{buildroot}
+
+%files
+%defattr(-,root,root,-)
+%{_bindir}/httop
+%{_docdir}/%{name}-%{version}-%{release}
+
+%changelog
+* Wed Jun 26 2013 Ryan Doyle <ryan@doylenet.net> <%= version %>
+- RPM spec

@@ -1,0 +1,240 @@
+#!/usr/bin/env ruby
+require 'pp'
+
+module Colored
+  extend self
+
+  COLORS = {
+    'black'   => 30,
+    'red'     => 31,
+    'green'   => 32,
+    'yellow'  => 33,
+    'blue'    => 34,
+    'magenta' => 35,
+    'cyan'    => 36,
+    'white'   => 37
+  }
+
+  EXTRAS = {
+    'clear'     => 0,
+    'bold'      => 1,
+    'underline' => 4,
+    'reversed'  => 7
+  }
+
+  COLORS.each do |color, value|
+    define_method(color) do
+      colorize(self, :foreground => color)
+    end
+
+    define_method("on_#{color}") do
+      colorize(self, :background => color)
+    end
+
+    COLORS.each do |highlight, value|
+      next if color == highlight
+      define_method("#{color}_on_#{highlight}") do
+        colorize(self, :foreground => color, :background => highlight)
+      end
+    end
+  end
+
+  EXTRAS.each do |extra, value|
+    next if extra == 'clear'
+    define_method(extra) do
+      colorize(self, :extra => extra)
+    end
+  end
+
+  define_method(:to_eol) do
+    tmp = sub(/^(\e\[[\[\e0-9;m]+m)/, "\\1\e[2K")
+    if tmp == self
+      return "\e[2K" << self
+    end
+    tmp
+  end
+
+  def colorize(string, options = {})
+    colored = [color(options[:foreground]), color("on_#{options[:background]}"), extra(options[:extra])].compact * ''
+    colored << string
+    colored << extra(:clear)
+  end
+
+  def colors
+    @@colors ||= COLORS.keys.sort
+  end
+
+  def extra(extra_name)
+    extra_name = extra_name.to_s
+    "\e[#{EXTRAS[extra_name]}m" if EXTRAS[extra_name]
+  end
+
+  def color(color_name)
+    background = color_name.to_s =~ /on_/
+    color_name = color_name.to_s.sub('on_', '')
+    return unless color_name && COLORS[color_name]
+    "\e[#{COLORS[color_name] + (background ? 10 : 0)}m"
+  end
+end unless Object.const_defined? :Colored
+
+String.send(:include, Colored)
+
+
+class ModStatusReader
+
+  attr_reader :last_restart , :parent_generation, :uptime, :total_accesses, :total_traffic, :user_time, :system_time, :children_user_time, :children_system_time, :requests_per_second, :data_per_second, :size_of_request, :workers, :requests_being_processed, :idle_workers
+
+  def initialize(url)
+    @url = url
+    refresh
+  end
+
+  def refresh
+    @html = `curl -sS #{@url}?notable`
+    refresh_header_items
+    refresh_worker_items
+  end
+
+  def refresh_header_items
+    _, @last_restart      = /<dt>Restart Time: (.*)<\/dt>/.match(@html.split("\n")[10]).to_a
+    _, @parent_generation = /<dt>Parent Server Generation: (.*)<\/dt>/.match(@html.split("\n")[11]).to_a
+    _, @uptime            = /<dt>Server uptime: +(.*)<\/dt>/.match(@html.split("\n")[12]).to_a
+    _, @total_accesses, @total_traffic = /<dt>Total accesses: (.*) - Total Traffic: (.*)<\/dt>/.match(@html.split("\n")[13]).to_a
+    _, @user_time, @system_time, @children_user_time, @children_system_time  = /<dt>CPU Usage: u(.*) s(.*) cu(.*) cs(.*) - (.*) CPU load<\/dt>/.match(@html.split("\n")[14]).to_a
+    _, @requests_per_second, @data_per_second, @size_of_request = /<dt>(.*) requests\/sec - (.*)\/second - (.*)\/request<\/dt>/.match(@html.split("\n")[15]).to_a
+    _, @requests_being_processed, @idle_workers = /<dt>(\d+) requests currently being processed, (\d+) idle workers<\/dt>/.match(@html.split("\n")[16]).to_a
+  end
+
+  def refresh_worker_items
+    @workers = @html.scan(/<b>Server (\d+)-(\d+)<\/b> \((.*?)\): (\d+)\|(\d+)\|(\d+) \[(.*?)\] u(.*?) s(.*?) cu(.*?) cs(.*?)\n (\d+) (\d+) \((.*?)\|(.*?)\|(.*?)\)\n <i>(.*?) \{(.*?)\}<\/i> <b>\[(.*?)\]<\/b><br \/>/m)
+    strip_html
+    filter_uninteresting_status
+    sort_by_cpu_time
+    merge_into_hash
+  end
+
+  private
+  def merge_into_hash
+    # order of symbols maps to the array element
+    @workers = @workers.collect do |worker|
+      Hash[[
+      :server_id, 
+      :generation, 
+      :pid, 
+      :connection_count, 
+      :my_access_count, 
+      :access_count, 
+      :worker_state, 
+      :worker_user_time, 
+      :worker_system_time, 
+      :worker_children_user_time, 
+      :worker_children_system_time, 
+      :time_since_last_request, 
+      :request_time, 
+      :conn_bytes, 
+      :my_bytes, 
+      :bytes, 
+      :client_ip, 
+      :request, 
+      :vhost].zip(worker)]
+    end
+  end
+
+  def strip_html
+    @workers.collect! do |worker|
+      worker.collect! do |e|
+        e.gsub(/<.*?>/, '')
+      end
+    end
+  end
+
+  def filter_uninteresting_status
+    @workers.delete_if do |worker|
+      ["Dead", "Keepalive", "Ready"].include?(worker[6])
+    end
+  end
+
+  def sort_by_cpu_time
+    @workers.sort! { |a,b| b[7].to_f <=> a[7].to_f }
+  end
+
+end
+
+# Printing helpers
+module PrintingHelpers
+
+  HEADER_SIZE = 9
+
+  def right(string, width)
+    if string.size > width 
+      return string
+    else
+      (width - string.size).times do |i|
+         string.insert(i, " ")
+      end
+      return string
+    end
+  end
+
+  def left(string, width)
+    if string.size > width 
+      return string
+    else
+      (width - string.size).times do
+        string.concat(" ")
+      end
+      return string
+    end
+  end
+
+  def clear
+    print "\e[H\e[2J"
+  end
+
+
+  def display_size
+    `tput lines`.strip.to_i - HEADER_SIZE
+  end 
+
+  def workers_to_display(sr)
+    if sr.length > display_size
+      display_size
+    else
+      sr.length
+    end
+  end
+
+end
+
+
+include PrintingHelpers
+@sr = ModStatusReader.new("http://localhost/server-status")
+
+# Main loop
+while true
+  # Clear screen
+  clear
+  # Header
+  print "httop - up: #{@sr.uptime.bold}, restarted: #{@sr.last_restart.bold}\n"
+  print "generation: #{@sr.parent_generation.bold}, total accesses: #{@sr.total_accesses.bold}, total traffic: #{@sr.total_traffic.bold} \n"
+  print "user time: #{@sr.user_time.bold}, system time #{@sr.system_time.bold}, children user time: #{@sr.children_user_time.bold}, children system time: #{@sr.children_user_time.bold}\n"
+  print "requests per second: #{@sr.requests_per_second.bold}, throughput: #{@sr.data_per_second.bold}/s mean request size: #{@sr.size_of_request.bold}\n"
+  print "requests being processed: #{@sr.requests_being_processed.bold} workers idle: #{@sr.idle_workers.bold}\n\n"
+
+  # Reversed bar
+  print "  ID GEN   PID  STATE      UTIME   STIME LASTREQ REQTIME REQBYTES   MYBYTES  ALLBYTES  CLIENT          REQUEST                                                                \n".reversed
+
+  # Workers, printed to the right size
+  workers_to_display(@sr.workers).times do |i|
+    worker = @sr.workers[i]
+    print "#{right(worker[:server_id],4)}#{right(worker[:generation], 4)}#{right(worker[:pid],6)}  #{left(worker[:worker_state], 9).bold}#{right(worker[:worker_user_time],7)} #{right(worker[:worker_system_time],7)} #{right(worker[:time_since_last_request],7)} #{right(worker[:request_time],7)} #{right(worker[:conn_bytes],8)} #{right(worker[:my_bytes],9)} #{right(worker[:bytes],9)}  #{left(worker[:client_ip],15)} #{left(worker[:request],32)}\n"
+  end
+
+  # Add info bar if we are truncating
+  if @sr.workers.length > display_size 
+    print "Window too small to display all workers, truncating #{@sr.workers.length - display_size} ".reversed
+    print "\n"
+  end
+  sleep 1
+  @sr.refresh
+end
