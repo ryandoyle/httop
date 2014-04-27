@@ -19,8 +19,10 @@ Yeah, I did find that out afterwards. There's one called [Apachetop](https://git
 
 ### Using RPM ###
 You're going to need `rpmbuild` and `rake` installed to build the RPM
-    rake rpm
-    scp rpm/RPMS/noarch/httop-*.rpm my-apache-server:
-    rake clean
-    ssh my-apache-server
-    sudo rpm -Uvh httop-*.rpm
+```
+rake rpm
+scp rpm/RPMS/noarch/httop-*.rpm my-apache-server:
+rake clean
+ssh my-apache-server
+sudo rpm -Uvh httop-*.rpm
+```
